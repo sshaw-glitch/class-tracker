@@ -52,7 +52,8 @@
 
   .student {
     display: grid;
-    grid-template-columns: 1fr 100px 100px 100px;
+    grid-template-columns: 1fr 150px 150px 150px;
+    column-gap: 10px;
     align-items: center;
     background: #fff;
     border-radius: 12px;
@@ -77,6 +78,14 @@
   .ec .value { color: #15803d; }
   .det .value { color: #b91c1c; }
   .part .value { color: #1d4ed8; }
+  .note {
+    width: 100%; margin-top: 6px; min-height: 46px; resize: vertical;
+    font-family: inherit; font-size: .8rem; color: #1d2433;
+    border: 1px solid #d6dbe7; border-radius: 6px; padding: 4px 6px;
+  }
+  .note[readonly] { background: #f8f9fc; border-style: dashed; }
+  .note.saving { border-color: #f59e0b; }
+  .note.saved { border-color: #16a34a; }
   .unit { font-size: .75rem; color: #5a6478; margin-top: -4px; margin-bottom: 4px; }
 
   .arrow:disabled { opacity: .3; cursor: not-allowed; }
@@ -92,8 +101,10 @@
   @keyframes flash { 0% { background: #fde68a; border-radius: 6px; } 100% { background: transparent; } }
 
   @media (max-width: 480px) {
-    .student { grid-template-columns: 1fr 66px 66px 66px; padding: 8px 6px; }
-    .student.head { font-size: .65rem; }
+    .student { grid-template-columns: 1fr 1fr 1fr; column-gap: 6px; padding: 10px 8px; }
+    .student .name { grid-column: 1 / -1; margin-bottom: 6px; }
+    .student.head span:first-child { display: none; }
+    .student.head { font-size: .7rem; }
     .arrow { width: 36px; }
     .value { font-size: 1.25rem; }
     .name { font-size: 1rem; }
@@ -182,7 +193,9 @@ function lock() {
 function getRecord(cls, name) {
   data[cls] = data[cls] || {};
   data[cls][name] = data[cls][name] || { ec: 0, det: 0, part: PARTICIPATION_START };
-  if (data[cls][name].part === undefined) data[cls][name].part = PARTICIPATION_START;
+  const r = data[cls][name];
+  if (r.part === undefined) r.part = PARTICIPATION_START;
+  ["ecNote", "detNote", "partNote"].forEach(k => { if (r[k] === undefined) r[k] = ""; });
   return data[cls][name];
 }
 
@@ -213,6 +226,7 @@ function counterHTML(kind, value, unit) {
       <div class="value">${value}</div>
       ${unit ? `<div class="unit">${unit}</div>` : ""}
       <button class="arrow" data-kind="${kind}" data-dir="-1" aria-label="down" ${off}>▼</button>
+      <textarea class="note" data-kind="${kind}" ${pin ? 'placeholder="Notes…"' : 'readonly placeholder="No notes"'}></textarea>
     </div>`;
 }
 
@@ -260,6 +274,43 @@ async function showClass(cls) {
     displays[name + "|ec"] = row.querySelector(".ec .value");
     displays[name + "|det"] = row.querySelector(".det .value");
     displays[name + "|part"] = row.querySelector(".part .value");
+
+    // Notes boxes
+    row.querySelectorAll(".note").forEach(box => {
+      const noteKey = box.dataset.kind + "Note";
+      box.value = rec[noteKey];
+      displays[name + "|" + noteKey] = box;
+      if (!pin) return;
+      let timer = null;
+      const saveNote = async () => {
+        clearTimeout(timer);
+        if (box.dataset.dirty !== "yes") return;
+        box.dataset.dirty = "";
+        const text = box.value;
+        box.classList.remove("saved");
+        box.classList.add("saving");
+        pending++;
+        editSeq++;
+        try {
+          const r = await callSheet({ action: "note", cls, student: name, field: box.dataset.kind, text });
+          if (!r.ok) throw new Error(r.error);
+          rec[noteKey] = r.text;
+          box.classList.add("saved");
+        } catch (e) {
+          box.dataset.dirty = "yes";
+          alert("Couldn't save that note. Please try again.");
+        }
+        pending--;
+        box.classList.remove("saving");
+      };
+      box.addEventListener("input", () => {
+        box.dataset.dirty = "yes";
+        box.classList.remove("saved");
+        clearTimeout(timer);
+        timer = setTimeout(saveNote, 1000);   // save 1 second after you stop typing
+      });
+      box.addEventListener("blur", saveNote);
+    });
 
     row.querySelectorAll(".arrow").forEach(btn => {
       btn.onclick = async () => {
@@ -311,6 +362,11 @@ async function refreshCounts(cls) {
     const [name, kind] = key.split("|");
     const value = getRecord(cls, name)[kind];
     const el = current.displays[key];
+    if (el.tagName === "TEXTAREA") {
+      // Don't overwrite a note you're typing in
+      if (document.activeElement !== el && el.dataset.dirty !== "yes" && el.value !== value) el.value = value;
+      continue;
+    }
     if (el.textContent !== String(value)) {
       el.textContent = value;
       el.classList.remove("flash");
