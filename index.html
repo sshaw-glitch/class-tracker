@@ -83,6 +83,14 @@
     font-family: inherit; font-size: .8rem; color: #1d2433;
     border: 1px solid #d6dbe7; border-radius: 6px; padding: 4px 6px;
   }
+  .student.head span { display: flex; flex-direction: column; align-items: center; gap: 4px; }
+  .student.head span:first-child { align-items: flex-start; }
+  .reset-btn {
+    border: none; border-radius: 6px; padding: 3px 8px; cursor: pointer;
+    font-size: .7rem; font-weight: 600; text-transform: none;
+    background: #fef3c7; color: #92400e;
+  }
+  .reset-btn:hover { background: #fde68a; }
   .note[readonly] { background: #f8f9fc; border-style: dashed; }
   .note.saving { border-color: #f59e0b; }
   .note.saved { border-color: #16a34a; }
@@ -256,10 +264,13 @@ async function showClass(cls) {
       <h2 style="color:${info.color}">${cls}</h2>
       <button class="lock-btn ${pin ? "unlocked" : ""}">${pin ? "🔓 Done editing" : "🔒 Edit"}</button>
     </div>
-    <div class="student head"><span style="text-align:left">Student</span><span>Extra Credit</span><span>Detention</span><span>Participation</span></div>
+    <div class="student head"><span style="text-align:left">Student</span><span>Extra Credit${resetBtn("ec")}</span><span>Detention${resetBtn("det")}</span><span>Participation${resetBtn("part")}</span></div>
     <div id="list"></div>`;
   app.querySelector(".back-btn").onclick = () => { location.hash = ""; };
   app.querySelector(".lock-btn").onclick = pin ? lock : unlock;
+  app.querySelectorAll(".reset-btn").forEach(btn => {
+    btn.onclick = () => resetColumn(cls, btn.dataset.kind);
+  });
 
   const list = app.querySelector("#list");
   const displays = {};
@@ -347,6 +358,32 @@ async function showClass(cls) {
   });
 
   pollTimer = setInterval(() => refreshCounts(cls), REFRESH_SECONDS * 1000);
+}
+
+const LABELS = { ec: "Extra Credit", det: "Detention", part: "Participation" };
+
+function resetBtn(kind) {
+  return pin ? `<button class="reset-btn" data-kind="${kind}">↺ Reset</button>` : "";
+}
+
+// Reset one column for everyone in this class
+async function resetColumn(cls, kind) {
+  const value = kind === "part" ? PARTICIPATION_START : 0;
+  if (!confirm(`Reset ${LABELS[kind]} to ${value} for everyone in ${cls}?`)) return;
+  pending++;
+  editSeq++;
+  try {
+    const r = await callSheet({ action: "reset", cls, field: kind });
+    if (!r.ok) throw new Error(r.error);
+    CLASSES[cls].students.forEach(name => {
+      getRecord(cls, name)[kind] = r.value;
+      const el = current && current.displays[name + "|" + kind];
+      if (el) el.textContent = r.value;
+    });
+  } catch (e) {
+    alert("Couldn't reset. Please try again.");
+  }
+  pending--;
 }
 
 // Check the Sheet for changes made on other devices
