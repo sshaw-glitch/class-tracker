@@ -19,7 +19,7 @@
     text-align: center;
   }
   header h1 { margin: 0; font-size: 1.6rem; }
-  main { max-width: 760px; margin: 0 auto; padding: 20px; }
+  main { max-width: 820px; margin: 0 auto; padding: 20px; }
 
   /* Home: class buttons */
   .class-grid {
@@ -52,7 +52,7 @@
 
   .student {
     display: grid;
-    grid-template-columns: 1fr 110px 110px;
+    grid-template-columns: 1fr 100px 100px 100px;
     align-items: center;
     background: #fff;
     border-radius: 12px;
@@ -76,6 +76,7 @@
   .value { font-size: 1.5rem; font-weight: 700; margin: 4px 0; min-width: 40px; text-align: center; }
   .ec .value { color: #15803d; }
   .det .value { color: #b91c1c; }
+  .part .value { color: #1d4ed8; }
   .unit { font-size: .75rem; color: #5a6478; margin-top: -4px; margin-bottom: 4px; }
 
   .arrow:disabled { opacity: .3; cursor: not-allowed; }
@@ -91,7 +92,10 @@
   @keyframes flash { 0% { background: #fde68a; border-radius: 6px; } 100% { background: transparent; } }
 
   @media (max-width: 480px) {
-    .student { grid-template-columns: 1fr 86px 86px; padding: 8px 10px; }
+    .student { grid-template-columns: 1fr 66px 66px 66px; padding: 8px 6px; }
+    .student.head { font-size: .65rem; }
+    .arrow { width: 36px; }
+    .value { font-size: 1.25rem; }
     .name { font-size: 1rem; }
   }
 </style>
@@ -125,6 +129,8 @@ const CLASSES = {
   }
 };
 const DETENTION_STEP = 5;   // minutes added/removed per click
+const PARTICIPATION_STEP = 1;   // points added/removed per click
+const PARTICIPATION_START = 100;   // every student starts here (also the max)
 const SCRIPT_URL = "https://script.google.com/macros/s/AKfycbzhi_b2TfBOKtWt3xlRRYZU7tasmEwCMSqEuW10vbGzTSQdEFEeOvUHcjhySEPZBb9G7w/exec";   // Google Apps Script web app link
 // ===============================================
 
@@ -175,7 +181,8 @@ function lock() {
 
 function getRecord(cls, name) {
   data[cls] = data[cls] || {};
-  data[cls][name] = data[cls][name] || { ec: 0, det: 0 };
+  data[cls][name] = data[cls][name] || { ec: 0, det: 0, part: PARTICIPATION_START };
+  if (data[cls][name].part === undefined) data[cls][name].part = PARTICIPATION_START;
   return data[cls][name];
 }
 
@@ -235,7 +242,7 @@ async function showClass(cls) {
       <h2 style="color:${info.color}">${cls}</h2>
       <button class="lock-btn ${pin ? "unlocked" : ""}">${pin ? "🔓 Done editing" : "🔒 Edit"}</button>
     </div>
-    <div class="student head"><span style="text-align:left">Student</span><span>Extra Credit</span><span>Detention</span></div>
+    <div class="student head"><span style="text-align:left">Student</span><span>Extra Credit</span><span>Detention</span><span>Participation</span></div>
     <div id="list"></div>`;
   app.querySelector(".back-btn").onclick = () => { location.hash = ""; };
   app.querySelector(".lock-btn").onclick = pin ? lock : unlock;
@@ -248,20 +255,23 @@ async function showClass(cls) {
     const row = document.createElement("div");
     row.className = "student";
     row.innerHTML = `<div class="name"></div>` +
-      counterHTML("ec", rec.ec, "") + counterHTML("det", rec.det, "min");
+      counterHTML("ec", rec.ec, "") + counterHTML("det", rec.det, "min") + counterHTML("part", rec.part, "pts");
     row.querySelector(".name").textContent = name;
     displays[name + "|ec"] = row.querySelector(".ec .value");
     displays[name + "|det"] = row.querySelector(".det .value");
+    displays[name + "|part"] = row.querySelector(".part .value");
 
     row.querySelectorAll(".arrow").forEach(btn => {
       btn.onclick = async () => {
         const kind = btn.dataset.kind;
-        const delta = (kind === "det" ? DETENTION_STEP : 1) * Number(btn.dataset.dir);
+        const step = { ec: 1, det: DETENTION_STEP, part: PARTICIPATION_STEP }[kind];
+        const delta = step * Number(btn.dataset.dir);
         const display = btn.parentElement.querySelector(".value");
         const before = rec[kind];
 
         // Show the change right away, then save it to the Sheet
         rec[kind] = Math.max(0, before + delta);
+        if (kind === "part") rec[kind] = Math.min(PARTICIPATION_START, rec[kind]);
         display.textContent = rec[kind];
         display.classList.add("saving");
         pending++;
