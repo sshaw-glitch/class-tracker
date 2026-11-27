@@ -91,6 +91,14 @@
     background: #fef3c7; color: #92400e;
   }
   .reset-btn:hover { background: #fde68a; }
+  .send-area { text-align: center; margin-top: 28px; }
+  .send-btn {
+    border: none; border-radius: 10px; padding: 12px 20px; cursor: pointer;
+    font-size: 1rem; font-weight: 600; background: #1f3a8a; color: #fff;
+  }
+  .send-btn:disabled { opacity: .6; cursor: wait; }
+  .send-status { margin-top: 10px; color: #374151; }
+  .send-status a { color: #1d4ed8; }
   .note[readonly] { background: #f8f9fc; border-style: dashed; }
   .note.saving { border-color: #f59e0b; }
   .note.saved { border-color: #16a34a; }
@@ -175,22 +183,46 @@ function setPin(value) {
   } catch (e) {}
 }
 
-// Ask for the PIN and check it with the Google Sheet
-async function unlock() {
-  const entered = prompt("Enter teacher PIN to edit:");
-  if (entered === null) return;
+// Ask for the PIN and check it with the Google Sheet; returns true if correct
+async function requestPin() {
+  const entered = prompt("Enter teacher PIN:");
+  if (entered === null) return false;
   const savedPin = pin;
   pin = entered.trim();
   try {
     const r = await callSheet({ action: "check" });
-    if (!r.ok) { pin = savedPin; alert("Wrong PIN."); return; }
+    if (!r.ok) { pin = savedPin; alert("Wrong PIN."); return false; }
     setPin(pin);
+    return true;
   } catch (e) {
     pin = savedPin;
     alert("Couldn't reach the Google Sheet. Try again.");
-    return;
+    return false;
   }
-  route();
+}
+
+async function unlock() {
+  if (await requestPin()) route();
+}
+
+// Save a dated copy of every class to the "Class Trackers" spreadsheet
+async function sendToSheet(btn, status) {
+  if (!pin && !(await requestPin())) return;
+  const roster = {};
+  for (const cls in CLASSES) roster[cls] = CLASSES[cls].students;
+  btn.disabled = true;
+  btn.textContent = "Sending…";
+  status.textContent = "";
+  try {
+    const r = await callSheet({ action: "snapshot", roster });
+    if (!r.ok) throw new Error(r.error);
+    status.innerHTML = `✅ Sent ${r.date}. <a href="${r.url}" target="_blank" rel="noopener">Open Class Trackers sheet</a>`;
+  } catch (e) {
+    status.textContent = "❌ Couldn't send. " + (e.message === "Wrong PIN" ? "Enter the PIN again." : "Please try again.");
+    if (e.message === "Wrong PIN") setPin(null);
+  }
+  btn.disabled = false;
+  btn.textContent = "📤 Send all data to Google Sheet";
 }
 
 function lock() {
@@ -225,6 +257,12 @@ function showHome() {
     btn.onclick = () => { location.hash = encodeURIComponent(cls); };
     grid.appendChild(btn);
   }
+  const area = document.createElement("div");
+  area.className = "send-area";
+  area.innerHTML = `<button class="send-btn">📤 Send all data to Google Sheet</button><div class="send-status"></div>`;
+  const sendBtn = area.querySelector(".send-btn");
+  sendBtn.onclick = () => sendToSheet(sendBtn, area.querySelector(".send-status"));
+  app.appendChild(area);
 }
 
 function counterHTML(kind, value, unit) {
@@ -369,16 +407,20 @@ function resetBtn(kind) {
 // Reset one column for everyone in this class
 async function resetColumn(cls, kind) {
   const value = kind === "part" ? PARTICIPATION_START : 0;
-  if (!confirm(`Reset ${LABELS[kind]} to ${value} for everyone in ${cls}?`)) return;
+  if (!confirm(`Reset ${LABELS[kind]} to ${value} and clear its notes for everyone in ${cls}?`)) return;
   pending++;
   editSeq++;
   try {
     const r = await callSheet({ action: "reset", cls, field: kind });
     if (!r.ok) throw new Error(r.error);
     CLASSES[cls].students.forEach(name => {
-      getRecord(cls, name)[kind] = r.value;
+      const rec = getRecord(cls, name);
+      rec[kind] = r.value;
+      rec[kind + "Note"] = "";
       const el = current && current.displays[name + "|" + kind];
       if (el) el.textContent = r.value;
+      const box = current && current.displays[name + "|" + kind + "Note"];
+      if (box) { box.value = ""; box.dataset.dirty = ""; }
     });
   } catch (e) {
     alert("Couldn't reset. Please try again.");
