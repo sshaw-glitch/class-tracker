@@ -1,0 +1,246 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Mr. Shaw's Class Tracker</title>
+<style>
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    font-family: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+    background: #f4f6fb;
+    color: #1d2433;
+  }
+  header {
+    background: #1f3a8a;
+    color: #fff;
+    padding: 20px;
+    text-align: center;
+  }
+  header h1 { margin: 0; font-size: 1.6rem; }
+  main { max-width: 760px; margin: 0 auto; padding: 20px; }
+
+  /* Home: class buttons */
+  .class-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
+    gap: 16px;
+    margin-top: 10px;
+  }
+  .class-btn {
+    border: none;
+    border-radius: 14px;
+    padding: 34px 12px;
+    font-size: 1.3rem;
+    font-weight: 700;
+    color: #fff;
+    cursor: pointer;
+    box-shadow: 0 3px 8px rgba(0,0,0,.15);
+    transition: transform .1s;
+  }
+  .class-btn:hover { transform: translateY(-2px); }
+  .class-btn:active { transform: translateY(1px); }
+
+  /* Class page */
+  .top-bar { display: flex; align-items: center; gap: 12px; margin-bottom: 14px; }
+  .back-btn {
+    border: none; background: #e2e7f3; border-radius: 8px;
+    padding: 8px 14px; font-size: 1rem; cursor: pointer;
+  }
+  .top-bar h2 { margin: 0; }
+
+  .student {
+    display: grid;
+    grid-template-columns: 1fr 110px 110px;
+    align-items: center;
+    background: #fff;
+    border-radius: 12px;
+    padding: 10px 14px;
+    margin-bottom: 10px;
+    box-shadow: 0 1px 4px rgba(0,0,0,.08);
+  }
+  .student.head {
+    background: none; box-shadow: none; padding-top: 0; padding-bottom: 4px;
+    font-weight: 700; font-size: .85rem; color: #5a6478; text-transform: uppercase;
+  }
+  .student.head span { text-align: center; }
+  .name { font-size: 1.1rem; font-weight: 600; }
+
+  .counter { display: flex; flex-direction: column; align-items: center; }
+  .arrow {
+    border: none; background: #eef1f8; width: 44px; height: 30px;
+    border-radius: 8px; font-size: 1rem; cursor: pointer; line-height: 1;
+  }
+  .arrow:hover { background: #dbe2f2; }
+  .value { font-size: 1.5rem; font-weight: 700; margin: 4px 0; min-width: 40px; text-align: center; }
+  .ec .value { color: #15803d; }
+  .det .value { color: #b91c1c; }
+  .unit { font-size: .75rem; color: #5a6478; margin-top: -4px; margin-bottom: 4px; }
+
+  .arrow:disabled { opacity: .3; cursor: not-allowed; }
+  .lock-btn {
+    margin-left: auto; border: none; border-radius: 8px; padding: 8px 14px;
+    font-size: .95rem; cursor: pointer; background: #fee2e2; color: #991b1b; font-weight: 600;
+  }
+  .lock-btn.unlocked { background: #dcfce7; color: #166534; }
+
+  @media (max-width: 480px) {
+    .student { grid-template-columns: 1fr 86px 86px; padding: 8px 10px; }
+    .name { font-size: 1rem; }
+  }
+</style>
+</head>
+<body>
+<header><h1>Mr. Shaw's Class Tracker</h1></header>
+<main id="app"></main>
+
+<script>
+// ===== EDIT YOUR CLASSES AND STUDENTS HERE =====
+const CLASSES = {
+  "Science 7": {
+    color: "#16a34a",
+    students: ["Ava Martinez", "Liam Johnson", "Sofia Ramirez", "Noah Williams", "Isabella Chen",
+               "Mason Brown", "Mia Rodriguez", "Ethan Davis", "Camila Lopez", "Lucas Garcia"]
+  },
+  "Geometry 10": {
+    color: "#9333ea",
+    students: ["Olivia Thompson", "Jayden Perez", "Emma Wilson", "Daniel Kim", "Valentina Cruz",
+               "Elijah Moore", "Aaliyah Jackson", "Gabriel Torres", "Chloe Nguyen", "Adrian Reyes"]
+  },
+  "Algebra 9": {
+    color: "#ea580c",
+    students: ["Harper Lee", "Sebastian Diaz", "Zoe Anderson", "Josiah Harris", "Luna Morales",
+               "Carter White", "Nevaeh Robinson", "Mateo Hernandez", "Layla Scott", "Julian Flores"]
+  },
+  "Business Math 11": {
+    color: "#0284c7",
+    students: ["Amelia Clark", "Xavier Santos", "Aria Lewis", "Dominic Walker", "Gianna Rivera",
+               "Isaiah Young", "Natalia Gomez", "Caleb Allen", "Ximena Castillo", "Marcus Hall"]
+  }
+};
+const DETENTION_STEP = 5;   // minutes added/removed per click
+const PIN_HASH = "2dawridmjuo";   // scrambled teacher PIN
+// ===============================================
+
+// Scrambles the PIN so it isn't written in plain text in the page code
+function scramble(str) {
+  let h1 = 0xdeadbeef, h2 = 0x41c6ce57;
+  for (let i = 0; i < str.length; i++) {
+    const c = str.charCodeAt(i);
+    h1 = Math.imul(h1 ^ c, 2654435761);
+    h2 = Math.imul(h2 ^ c, 1597334677);
+  }
+  h1 = Math.imul(h1 ^ (h1 >>> 16), 2246822507) ^ Math.imul(h2 ^ (h2 >>> 13), 3266489909);
+  h2 = Math.imul(h2 ^ (h2 >>> 16), 2246822507) ^ Math.imul(h1 ^ (h1 >>> 13), 3266489909);
+  return (4294967296 * (2097151 & h2) + (h1 >>> 0)).toString(36);
+}
+
+let unlocked = false;
+try { unlocked = sessionStorage.getItem("teacherUnlocked") === "yes"; } catch (e) {}
+
+function setUnlocked(value) {
+  unlocked = value;
+  try { sessionStorage.setItem("teacherUnlocked", value ? "yes" : "no"); } catch (e) {}
+}
+
+// Ask for the PIN; returns true if correct (or already unlocked)
+function askPin() {
+  if (unlocked) return true;
+  const pin = prompt("Enter teacher PIN:");
+  if (pin === null) return false;
+  if (scramble(pin.trim()) !== PIN_HASH) { alert("Wrong PIN."); return false; }
+  setUnlocked(true);
+  return true;
+}
+
+function lockAndLeave() {
+  setUnlocked(false);
+  location.hash = "";
+  route();
+}
+
+const STORE_KEY = "classTrackerData";
+let data = {};
+try { data = JSON.parse(localStorage.getItem(STORE_KEY)) || {}; } catch (e) { data = {}; }
+
+function save() {
+  try { localStorage.setItem(STORE_KEY, JSON.stringify(data)); } catch (e) {}
+}
+function getRecord(cls, name) {
+  data[cls] = data[cls] || {};
+  data[cls][name] = data[cls][name] || { ec: 0, det: 0 };
+  return data[cls][name];
+}
+
+const app = document.getElementById("app");
+
+function showHome() {
+  app.innerHTML = '<div class="class-grid"></div>';
+  const grid = app.querySelector(".class-grid");
+  for (const cls in CLASSES) {
+    const btn = document.createElement("button");
+    btn.className = "class-btn";
+    btn.style.background = CLASSES[cls].color;
+    btn.textContent = cls;
+    btn.onclick = () => { if (askPin()) location.hash = encodeURIComponent(cls); };
+    grid.appendChild(btn);
+  }
+}
+
+function counterHTML(kind, value, unit) {
+  const off = "";
+  return `<div class="counter ${kind}">
+      <button class="arrow" data-kind="${kind}" data-dir="1" aria-label="up" ${off}>▲</button>
+      <div class="value">${value}</div>
+      ${unit ? `<div class="unit">${unit}</div>` : ""}
+      <button class="arrow" data-kind="${kind}" data-dir="-1" aria-label="down" ${off}>▼</button>
+    </div>`;
+}
+
+function showClass(cls) {
+  const info = CLASSES[cls];
+  app.innerHTML = `
+    <div class="top-bar">
+      <button class="back-btn">← Classes</button>
+      <h2 style="color:${info.color}">${cls}</h2>
+      <button class="lock-btn">🔒 Lock</button>
+    </div>
+    <div class="student head"><span style="text-align:left">Student</span><span>Extra Credit</span><span>Detention</span></div>
+    <div id="list"></div>`;
+  app.querySelector(".back-btn").onclick = () => { location.hash = ""; };
+  app.querySelector(".lock-btn").onclick = lockAndLeave;
+
+  const list = app.querySelector("#list");
+  info.students.forEach(name => {
+    const rec = getRecord(cls, name);
+    const row = document.createElement("div");
+    row.className = "student";
+    row.innerHTML = `<div class="name"></div>` +
+      counterHTML("ec", rec.ec, "") + counterHTML("det", rec.det, "min");
+    row.querySelector(".name").textContent = name;
+
+    row.querySelectorAll(".arrow").forEach(btn => {
+      btn.onclick = () => {
+        const kind = btn.dataset.kind;
+        const step = kind === "det" ? DETENTION_STEP : 1;
+        rec[kind] = Math.max(0, rec[kind] + step * Number(btn.dataset.dir));
+        btn.parentElement.querySelector(".value").textContent = rec[kind];
+        save();
+      };
+    });
+    list.appendChild(row);
+  });
+}
+
+function route() {
+  const cls = decodeURIComponent(location.hash.slice(1));
+  if (CLASSES[cls] && unlocked) { showClass(cls); return; }
+  if (location.hash) history.replaceState(null, "", location.pathname);
+  showHome();
+}
+window.addEventListener("hashchange", route);
+route();
+</script>
+</body>
+</html>
