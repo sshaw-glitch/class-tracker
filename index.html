@@ -87,6 +87,8 @@
 
   .status { text-align: center; color: #5a6478; font-size: 1.1rem; margin-top: 30px; }
   .value.saving { opacity: .5; }
+  .value.flash { animation: flash 1s; }
+  @keyframes flash { 0% { background: #fde68a; border-radius: 6px; } 100% { background: transparent; } }
 
   @media (max-width: 480px) {
     .student { grid-template-columns: 1fr 86px 86px; padding: 8px 10px; }
@@ -178,6 +180,11 @@ function getRecord(cls, name) {
 }
 
 const app = document.getElementById("app");
+const REFRESH_SECONDS = 4;   // how often to check the Sheet for new numbers
+let pollTimer = null;
+let pending = 0;   // changes still being saved
+let editSeq = 0;   // goes up every time you click an arrow
+let current = null;   // the class on screen and its number displays
 
 function showHome() {
   app.innerHTML = '<div class="class-grid"></div>';
@@ -234,6 +241,8 @@ async function showClass(cls) {
   app.querySelector(".lock-btn").onclick = pin ? lock : unlock;
 
   const list = app.querySelector("#list");
+  const displays = {};
+  current = { cls, displays };
   info.students.forEach(name => {
     const rec = getRecord(cls, name);
     const row = document.createElement("div");
@@ -241,6 +250,8 @@ async function showClass(cls) {
     row.innerHTML = `<div class="name"></div>` +
       counterHTML("ec", rec.ec, "") + counterHTML("det", rec.det, "min");
     row.querySelector(".name").textContent = name;
+    displays[name + "|ec"] = row.querySelector(".ec .value");
+    displays[name + "|det"] = row.querySelector(".det .value");
 
     row.querySelectorAll(".arrow").forEach(btn => {
       btn.onclick = async () => {
@@ -253,6 +264,8 @@ async function showClass(cls) {
         rec[kind] = Math.max(0, before + delta);
         display.textContent = rec[kind];
         display.classList.add("saving");
+        pending++;
+        editSeq++;
         try {
           const r = await callSheet({ action: "update", cls, student: name, field: kind, delta });
           if (!r.ok) {
@@ -264,15 +277,43 @@ async function showClass(cls) {
           rec[kind] = before;
           alert("Couldn't save that change. Please try again.");
         }
+        pending--;
         display.textContent = rec[kind];
         display.classList.remove("saving");
       };
     });
     list.appendChild(row);
   });
+
+  pollTimer = setInterval(() => refreshCounts(cls), REFRESH_SECONDS * 1000);
+}
+
+// Check the Sheet for changes made on other devices
+async function refreshCounts(cls) {
+  if (document.hidden || pending > 0) return;
+  const seqAtStart = editSeq;
+  let result;
+  try { result = await callSheet({ action: "load" }); } catch (e) { return; }
+  // Skip if you clicked something meanwhile or left this class
+  if (!result.ok || editSeq !== seqAtStart || pending > 0 || !current || current.cls !== cls) return;
+  data = result.counts || {};
+  for (const key in current.displays) {
+    const [name, kind] = key.split("|");
+    const value = getRecord(cls, name)[kind];
+    const el = current.displays[key];
+    if (el.textContent !== String(value)) {
+      el.textContent = value;
+      el.classList.remove("flash");
+      void el.offsetWidth;
+      el.classList.add("flash");
+    }
+  }
 }
 
 function route() {
+  clearInterval(pollTimer);
+  pending = 0;
+  current = null;
   const cls = decodeURIComponent(location.hash.slice(1));
   if (CLASSES[cls]) { showClass(cls); return; }
   if (location.hash) history.replaceState(null, "", location.pathname);
