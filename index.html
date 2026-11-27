@@ -85,6 +85,9 @@
   }
   .lock-btn.unlocked { background: #dcfce7; color: #166534; }
 
+  .status { text-align: center; color: #5a6478; font-size: 1.1rem; margin-top: 30px; }
+  .value.saving { opacity: .5; }
+
   @media (max-width: 480px) {
     .student { grid-template-columns: 1fr 86px 86px; padding: 8px 10px; }
     .name { font-size: 1rem; }
@@ -120,53 +123,48 @@ const CLASSES = {
   }
 };
 const DETENTION_STEP = 5;   // minutes added/removed per click
-const PIN_HASH = "2dawridmjuo";   // scrambled teacher PIN
+const SCRIPT_URL = "https://script.google.com/macros/s/AKfycbzhi_b2TfBOKtWt3xlRRYZU7tasmEwCMSqEuW10vbGzTSQdEFEeOvUHcjhySEPZBb9G7w/exec";   // Google Apps Script web app link
 // ===============================================
 
-// Scrambles the PIN so it isn't written in plain text in the page code
-function scramble(str) {
-  let h1 = 0xdeadbeef, h2 = 0x41c6ce57;
-  for (let i = 0; i < str.length; i++) {
-    const c = str.charCodeAt(i);
-    h1 = Math.imul(h1 ^ c, 2654435761);
-    h2 = Math.imul(h2 ^ c, 1597334677);
+let pin = null;
+try { pin = sessionStorage.getItem("teacherPin"); } catch (e) {}
+let data = {};
+
+// Send a request to the Google Sheet
+async function callSheet(body) {
+  const res = await fetch(SCRIPT_URL, {
+    method: "POST",
+    headers: { "Content-Type": "text/plain;charset=utf-8" },
+    body: JSON.stringify({ ...body, pin })
+  });
+  return res.json();
+}
+
+function setPin(value) {
+  pin = value;
+  try {
+    if (value) sessionStorage.setItem("teacherPin", value);
+    else sessionStorage.removeItem("teacherPin");
+  } catch (e) {}
+}
+
+// Ask for the PIN and check it with the Google Sheet
+async function unlockAndOpen(cls) {
+  if (!pin) {
+    const entered = prompt("Enter teacher PIN:");
+    if (entered === null) return;
+    setPin(entered.trim());
   }
-  h1 = Math.imul(h1 ^ (h1 >>> 16), 2246822507) ^ Math.imul(h2 ^ (h2 >>> 13), 3266489909);
-  h2 = Math.imul(h2 ^ (h2 >>> 16), 2246822507) ^ Math.imul(h1 ^ (h1 >>> 13), 3266489909);
-  return (4294967296 * (2097151 & h2) + (h1 >>> 0)).toString(36);
-}
-
-let unlocked = false;
-try { unlocked = sessionStorage.getItem("teacherUnlocked") === "yes"; } catch (e) {}
-
-function setUnlocked(value) {
-  unlocked = value;
-  try { sessionStorage.setItem("teacherUnlocked", value ? "yes" : "no"); } catch (e) {}
-}
-
-// Ask for the PIN; returns true if correct (or already unlocked)
-function askPin() {
-  if (unlocked) return true;
-  const pin = prompt("Enter teacher PIN:");
-  if (pin === null) return false;
-  if (scramble(pin.trim()) !== PIN_HASH) { alert("Wrong PIN."); return false; }
-  setUnlocked(true);
-  return true;
+  location.hash = encodeURIComponent(cls);
 }
 
 function lockAndLeave() {
-  setUnlocked(false);
+  setPin(null);
+  data = {};
   location.hash = "";
   route();
 }
 
-const STORE_KEY = "classTrackerData";
-let data = {};
-try { data = JSON.parse(localStorage.getItem(STORE_KEY)) || {}; } catch (e) { data = {}; }
-
-function save() {
-  try { localStorage.setItem(STORE_KEY, JSON.stringify(data)); } catch (e) {}
-}
 function getRecord(cls, name) {
   data[cls] = data[cls] || {};
   data[cls][name] = data[cls][name] || { ec: 0, det: 0 };
@@ -183,23 +181,41 @@ function showHome() {
     btn.className = "class-btn";
     btn.style.background = CLASSES[cls].color;
     btn.textContent = cls;
-    btn.onclick = () => { if (askPin()) location.hash = encodeURIComponent(cls); };
+    btn.onclick = () => unlockAndOpen(cls);
     grid.appendChild(btn);
   }
 }
 
 function counterHTML(kind, value, unit) {
-  const off = "";
   return `<div class="counter ${kind}">
-      <button class="arrow" data-kind="${kind}" data-dir="1" aria-label="up" ${off}>▲</button>
+      <button class="arrow" data-kind="${kind}" data-dir="1" aria-label="up">▲</button>
       <div class="value">${value}</div>
       ${unit ? `<div class="unit">${unit}</div>` : ""}
-      <button class="arrow" data-kind="${kind}" data-dir="-1" aria-label="down" ${off}>▼</button>
+      <button class="arrow" data-kind="${kind}" data-dir="-1" aria-label="down">▼</button>
     </div>`;
 }
 
-function showClass(cls) {
+async function showClass(cls) {
   const info = CLASSES[cls];
+  app.innerHTML = `<p class="status">Loading ${cls}…</p>`;
+
+  // Always load the latest numbers from the Google Sheet
+  let result;
+  try {
+    result = await callSheet({ action: "load" });
+  } catch (e) {
+    app.innerHTML = `<p class="status">Couldn't reach the Google Sheet. Check your internet and try again.</p>
+      <button class="back-btn">← Classes</button>`;
+    app.querySelector(".back-btn").onclick = () => { location.hash = ""; };
+    return;
+  }
+  if (!result.ok) {
+    alert(result.error === "Wrong PIN" ? "Wrong PIN." : "Error: " + result.error);
+    lockAndLeave();
+    return;
+  }
+  data = result.counts || {};
+
   app.innerHTML = `
     <div class="top-bar">
       <button class="back-btn">← Classes</button>
@@ -221,12 +237,26 @@ function showClass(cls) {
     row.querySelector(".name").textContent = name;
 
     row.querySelectorAll(".arrow").forEach(btn => {
-      btn.onclick = () => {
+      btn.onclick = async () => {
         const kind = btn.dataset.kind;
-        const step = kind === "det" ? DETENTION_STEP : 1;
-        rec[kind] = Math.max(0, rec[kind] + step * Number(btn.dataset.dir));
-        btn.parentElement.querySelector(".value").textContent = rec[kind];
-        save();
+        const delta = (kind === "det" ? DETENTION_STEP : 1) * Number(btn.dataset.dir);
+        const display = btn.parentElement.querySelector(".value");
+        const before = rec[kind];
+
+        // Show the change right away, then save it to the Sheet
+        rec[kind] = Math.max(0, before + delta);
+        display.textContent = rec[kind];
+        display.classList.add("saving");
+        try {
+          const r = await callSheet({ action: "update", cls, student: name, field: kind, delta });
+          if (!r.ok) throw new Error(r.error);
+          rec[kind] = r.value;
+        } catch (e) {
+          rec[kind] = before;
+          alert("Couldn't save that change. Please try again.");
+        }
+        display.textContent = rec[kind];
+        display.classList.remove("saving");
       };
     });
     list.appendChild(row);
@@ -235,7 +265,7 @@ function showClass(cls) {
 
 function route() {
   const cls = decodeURIComponent(location.hash.slice(1));
-  if (CLASSES[cls] && unlocked) { showClass(cls); return; }
+  if (CLASSES[cls] && pin) { showClass(cls); return; }
   if (location.hash) history.replaceState(null, "", location.pathname);
   showHome();
 }
