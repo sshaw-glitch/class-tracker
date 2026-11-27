@@ -149,19 +149,25 @@ function setPin(value) {
 }
 
 // Ask for the PIN and check it with the Google Sheet
-async function unlockAndOpen(cls) {
-  if (!pin) {
-    const entered = prompt("Enter teacher PIN:");
-    if (entered === null) return;
-    setPin(entered.trim());
+async function unlock() {
+  const entered = prompt("Enter teacher PIN to edit:");
+  if (entered === null) return;
+  const savedPin = pin;
+  pin = entered.trim();
+  try {
+    const r = await callSheet({ action: "check" });
+    if (!r.ok) { pin = savedPin; alert("Wrong PIN."); return; }
+    setPin(pin);
+  } catch (e) {
+    pin = savedPin;
+    alert("Couldn't reach the Google Sheet. Try again.");
+    return;
   }
-  location.hash = encodeURIComponent(cls);
+  route();
 }
 
-function lockAndLeave() {
+function lock() {
   setPin(null);
-  data = {};
-  location.hash = "";
   route();
 }
 
@@ -181,17 +187,18 @@ function showHome() {
     btn.className = "class-btn";
     btn.style.background = CLASSES[cls].color;
     btn.textContent = cls;
-    btn.onclick = () => unlockAndOpen(cls);
+    btn.onclick = () => { location.hash = encodeURIComponent(cls); };
     grid.appendChild(btn);
   }
 }
 
 function counterHTML(kind, value, unit) {
+  const off = pin ? "" : "disabled";
   return `<div class="counter ${kind}">
-      <button class="arrow" data-kind="${kind}" data-dir="1" aria-label="up">▲</button>
+      <button class="arrow" data-kind="${kind}" data-dir="1" aria-label="up" ${off}>▲</button>
       <div class="value">${value}</div>
       ${unit ? `<div class="unit">${unit}</div>` : ""}
-      <button class="arrow" data-kind="${kind}" data-dir="-1" aria-label="down">▼</button>
+      <button class="arrow" data-kind="${kind}" data-dir="-1" aria-label="down" ${off}>▼</button>
     </div>`;
 }
 
@@ -210,8 +217,7 @@ async function showClass(cls) {
     return;
   }
   if (!result.ok) {
-    alert(result.error === "Wrong PIN" ? "Wrong PIN." : "Error: " + result.error);
-    lockAndLeave();
+    app.innerHTML = `<p class="status">Error: ${result.error}</p>`;
     return;
   }
   data = result.counts || {};
@@ -220,12 +226,12 @@ async function showClass(cls) {
     <div class="top-bar">
       <button class="back-btn">← Classes</button>
       <h2 style="color:${info.color}">${cls}</h2>
-      <button class="lock-btn">🔒 Lock</button>
+      <button class="lock-btn ${pin ? "unlocked" : ""}">${pin ? "🔓 Done editing" : "🔒 Edit"}</button>
     </div>
     <div class="student head"><span style="text-align:left">Student</span><span>Extra Credit</span><span>Detention</span></div>
     <div id="list"></div>`;
   app.querySelector(".back-btn").onclick = () => { location.hash = ""; };
-  app.querySelector(".lock-btn").onclick = lockAndLeave;
+  app.querySelector(".lock-btn").onclick = pin ? lock : unlock;
 
   const list = app.querySelector("#list");
   info.students.forEach(name => {
@@ -249,7 +255,10 @@ async function showClass(cls) {
         display.classList.add("saving");
         try {
           const r = await callSheet({ action: "update", cls, student: name, field: kind, delta });
-          if (!r.ok) throw new Error(r.error);
+          if (!r.ok) {
+            if (r.error === "Wrong PIN") { setPin(null); alert("Please enter the PIN again."); route(); return; }
+            throw new Error(r.error);
+          }
           rec[kind] = r.value;
         } catch (e) {
           rec[kind] = before;
@@ -265,7 +274,7 @@ async function showClass(cls) {
 
 function route() {
   const cls = decodeURIComponent(location.hash.slice(1));
-  if (CLASSES[cls] && pin) { showClass(cls); return; }
+  if (CLASSES[cls]) { showClass(cls); return; }
   if (location.hash) history.replaceState(null, "", location.pathname);
   showHome();
 }
