@@ -206,23 +206,27 @@ async function unlock() {
 }
 
 // Save a dated copy of every class to the "Class Trackers" spreadsheet
-async function sendToSheet(btn, status) {
+// onlyCls = a class name to send just that class, or nothing to send all
+async function sendToSheet(btn, status, onlyCls) {
   if (!pin && !(await requestPin())) return;
+  const label = btn.textContent;
   const roster = {};
-  for (const cls in CLASSES) roster[cls] = CLASSES[cls].students;
+  for (const cls in CLASSES) {
+    if (!onlyCls || cls === onlyCls) roster[cls] = CLASSES[cls].students;
+  }
   btn.disabled = true;
   btn.textContent = "Sending…";
   status.textContent = "";
   try {
     const r = await callSheet({ action: "snapshot", roster });
     if (!r.ok) throw new Error(r.error);
-    status.innerHTML = `✅ Sent ${r.date}. <a href="${r.url}" target="_blank" rel="noopener">Open Class Trackers sheet</a>`;
+    status.innerHTML = `✅ Sent ${onlyCls || "all classes"} ${r.date}. <a href="${r.url}" target="_blank" rel="noopener">Open Class Trackers sheet</a>`;
   } catch (e) {
     status.textContent = "❌ Couldn't send. " + (e.message === "Wrong PIN" ? "Enter the PIN again." : "Please try again.");
     if (e.message === "Wrong PIN") setPin(null);
   }
   btn.disabled = false;
-  btn.textContent = "📤 Send all data to Google Sheet";
+  btn.textContent = label;
 }
 
 function lock() {
@@ -394,6 +398,15 @@ async function showClass(cls) {
     });
     list.appendChild(row);
   });
+
+  const area = document.createElement("div");
+  area.className = "send-area";
+  area.innerHTML = `<button class="send-btn"></button><div class="send-status"></div>`;
+  const sendBtn = area.querySelector(".send-btn");
+  sendBtn.textContent = `📤 Send ${cls} to Google Sheet`;
+  sendBtn.style.background = info.color;
+  sendBtn.onclick = () => sendToSheet(sendBtn, area.querySelector(".send-status"), cls);
+  app.appendChild(area);
 
   pollTimer = setInterval(() => refreshCounts(cls), REFRESH_SECONDS * 1000);
 }
