@@ -52,7 +52,7 @@
 
   .student {
     display: grid;
-    grid-template-columns: 1fr 150px 150px 150px;
+    grid-template-columns: 1fr 170px 150px 150px;
     column-gap: 10px;
     align-items: center;
     background: #fff;
@@ -102,6 +102,11 @@
   .note[readonly] { background: #f8f9fc; border-style: dashed; }
   .note.saving { border-color: #f59e0b; }
   .note.saved { border-color: #16a34a; }
+  .ec-row { display: flex; justify-content: center; gap: 4px; width: 100%; }
+  .ec-sub { display: flex; flex-direction: column; align-items: center; flex: 1; min-width: 0; }
+  .ec-sub .arrow { width: 100%; max-width: 44px; }
+  .ec-sub .value { font-size: 1.3rem; min-width: 0; }
+  .sub-label { font-size: .68rem; font-weight: 700; color: #15803d; margin-bottom: 2px; }
   .unit { font-size: .75rem; color: #5a6478; margin-top: -4px; margin-bottom: 4px; }
 
   .arrow:disabled { opacity: .3; cursor: not-allowed; }
@@ -122,6 +127,8 @@
     .student.head span:first-child { display: none; }
     .student.head { font-size: .7rem; }
     .arrow { width: 36px; }
+    .ec-sub .arrow { width: 100%; }
+    .ec-sub .value { font-size: 1.1rem; }
     .value { font-size: 1.25rem; }
     .name { font-size: 1rem; }
   }
@@ -236,9 +243,11 @@ function lock() {
 
 function getRecord(cls, name) {
   data[cls] = data[cls] || {};
-  data[cls][name] = data[cls][name] || { ec: 0, det: 0, part: PARTICIPATION_START };
+  data[cls][name] = data[cls][name] || { ec: 0, ecHw: 0, ecTest: 0, det: 0, part: PARTICIPATION_START };
   const r = data[cls][name];
   if (r.part === undefined) r.part = PARTICIPATION_START;
+  if (r.ecHw === undefined) r.ecHw = 0;
+  if (r.ecTest === undefined) r.ecTest = 0;
   ["ecNote", "detNote", "partNote"].forEach(k => { if (r[k] === undefined) r[k] = ""; });
   return data[cls][name];
 }
@@ -277,6 +286,22 @@ function counterHTML(kind, value, unit) {
       ${unit ? `<div class="unit">${unit}</div>` : ""}
       <button class="arrow" data-kind="${kind}" data-dir="-1" aria-label="down" ${off}>▼</button>
       <textarea class="note" data-kind="${kind}" ${pin ? 'placeholder="Notes…"' : 'readonly placeholder="No notes"'}></textarea>
+    </div>`;
+}
+
+// Extra Credit column: 3 small counters side by side, one notes box underneath
+const EC_PARTS = [["ec", "Part."], ["ecHw", "HW"], ["ecTest", "Test"]];
+function ecCounterHTML(rec) {
+  const off = pin ? "" : "disabled";
+  const subs = EC_PARTS.map(([kind, label]) => `<div class="ec-sub" data-kind="${kind}">
+        <div class="sub-label">${label}</div>
+        <button class="arrow" data-kind="${kind}" data-dir="1" aria-label="${label} up" ${off}>▲</button>
+        <div class="value">${rec[kind]}</div>
+        <button class="arrow" data-kind="${kind}" data-dir="-1" aria-label="${label} down" ${off}>▼</button>
+      </div>`).join("");
+  return `<div class="counter ec">
+      <div class="ec-row">${subs}</div>
+      <textarea class="note" data-kind="ec" ${pin ? 'placeholder="Notes…"' : 'readonly placeholder="No notes"'}></textarea>
     </div>`;
 }
 
@@ -322,9 +347,11 @@ async function showClass(cls) {
     const row = document.createElement("div");
     row.className = "student";
     row.innerHTML = `<div class="name"></div>` +
-      counterHTML("ec", rec.ec, "") + counterHTML("det", rec.det, "min") + counterHTML("part", rec.part, "pts");
+      ecCounterHTML(rec) + counterHTML("det", rec.det, "min") + counterHTML("part", rec.part, "pts");
     row.querySelector(".name").textContent = name;
-    displays[name + "|ec"] = row.querySelector(".ec .value");
+    EC_PARTS.forEach(([kind]) => {
+      displays[name + "|" + kind] = row.querySelector(`.ec-sub[data-kind="${kind}"] .value`);
+    });
     displays[name + "|det"] = row.querySelector(".det .value");
     displays[name + "|part"] = row.querySelector(".part .value");
 
@@ -368,7 +395,7 @@ async function showClass(cls) {
     row.querySelectorAll(".arrow").forEach(btn => {
       btn.onclick = async () => {
         const kind = btn.dataset.kind;
-        const step = { ec: 1, det: DETENTION_STEP, part: PARTICIPATION_STEP }[kind];
+        const step = { ec: 1, ecHw: 1, ecTest: 1, det: DETENTION_STEP, part: PARTICIPATION_STEP }[kind];
         const delta = step * Number(btn.dataset.dir);
         const display = btn.parentElement.querySelector(".value");
         const before = rec[kind];
@@ -420,18 +447,21 @@ function resetBtn(kind) {
 // Reset one column for everyone in this class
 async function resetColumn(cls, kind) {
   const value = kind === "part" ? PARTICIPATION_START : 0;
-  if (!confirm(`Reset ${LABELS[kind]} to ${value} and clear its notes for everyone in ${cls}?`)) return;
+  if (!confirm(`Reset ${LABELS[kind]} ${kind === "ec" ? " (Participation, Homework and Tests)" : ""} to ${value} and clear its notes for everyone in ${cls}?`)) return;
   pending++;
   editSeq++;
   try {
     const r = await callSheet({ action: "reset", cls, field: kind });
     if (!r.ok) throw new Error(r.error);
+    const kinds = kind === "ec" ? EC_PARTS.map(p => p[0]) : [kind];
     CLASSES[cls].students.forEach(name => {
       const rec = getRecord(cls, name);
-      rec[kind] = r.value;
       rec[kind + "Note"] = "";
-      const el = current && current.displays[name + "|" + kind];
-      if (el) el.textContent = r.value;
+      kinds.forEach(k => {
+        rec[k] = r.value;
+        const el = current && current.displays[name + "|" + k];
+        if (el) el.textContent = r.value;
+      });
       const box = current && current.displays[name + "|" + kind + "Note"];
       if (box) { box.value = ""; box.dataset.dirty = ""; }
     });
